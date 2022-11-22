@@ -10,7 +10,7 @@
 using namespace std;
 using namespace mfem;
 
-class SigmaCoefficient : public Coefficient
+class SigmaCoefficient : public VectorCoefficient
 {
 private:
   GridFunction &u;
@@ -18,9 +18,9 @@ private:
   DenseMatrix eps, sigma;
 
 public:
-  SigmaCoefficient(GridFunction &_u, Coefficient &_lambda, Coefficient &_mu)
-    : u(_u), lambda(_lambda), mu(_mu) { component = -1; }
-  virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip)
+  SigmaCoefficient(GridFunction &_u, Coefficient &_lambda, Coefficient &_mu, int vdim)
+    : VectorCoefficient(vdim), u(_u), lambda(_lambda), mu(_mu) { }
+  virtual void Eval(Vector &V, ElementTransformation &T, const IntegrationPoint &ip)
   {
     u.GetVectorGradient(T, eps);  // eps = grad(u)
     eps.Symmetrize();             // eps = (1/2)*(grad(u) + grad(u)^t)
@@ -29,23 +29,12 @@ public:
     sigma.Diag(l*eps.Trace(), eps.Size()); // sigma = lambda*trace(eps)*I
     sigma.Add(2*m, eps);          // sigma += 2*mu*eps
 
-    switch (component)
-    {
-      case 0:
-        return sigma(0, 0); // Sxx
-      case 1:
-        return sigma(0, 1); // Sxy
-      case 2:
-        return sigma(1, 1); // Syy
-      default:
-        throw runtime_error("Only 0(Sxx), 1(Sxy) and 2(Syy) are supported.");
-    }
+    V(0) = sigma(0, 0); // Sxx
+    V(1) = sigma(0, 1); // Sxy
+    V(2) = sigma(1, 1); // Syy
   }
   virtual void Read(istream &in) { }
   virtual ~SigmaCoefficient() { }
-  void setComponent (char _component) { component = _component; }
-private:
-  char component;
 };
 
 int main(int argc, char *argv[])
@@ -182,26 +171,20 @@ int main(int argc, char *argv[])
   x.SaveVTK(vtkFs, "displacement", 0);
 
   // Calculate Sigma.
-  L2_FECollection pp_fec(order, dim);
-  FiniteElementSpace pp_fespace(mesh, &pp_fec);
+  L2_FECollection pp_fec(order-1, dim);
+  int vdim = 3; // Vector(Sxx, Sxy, Syy)
+  FiniteElementSpace pp_fespace(mesh, &pp_fec, vdim);
   GridFunction pp_field(&pp_fespace);
 
-  SigmaCoefficient pp_coeff(x, lambda_func, mu_func);
-  pp_coeff.setComponent(0);
+  SigmaCoefficient pp_coeff(x, lambda_func, mu_func, vdim);
   pp_field.ProjectCoefficient(pp_coeff);
-  pp_field.SaveVTK(vtkFs, "sigma_xx", 0);
-  pp_coeff.setComponent(1);
-  pp_field.ProjectCoefficient(pp_coeff);
-  pp_field.SaveVTK(vtkFs, "sigma_xy", 0);
-  pp_coeff.setComponent(2);
-  pp_field.ProjectCoefficient(pp_coeff);
-  pp_field.SaveVTK(vtkFs, "sigma_yy", 0);
+  pp_field.SaveVTK(vtkFs, "Sigma", 0);
   
-   delete a;
-   delete b;
-   delete fespace;
-   delete fec;
-   delete mesh;
+  delete a;
+  delete b;
+  delete fespace;
+  delete fec;
+  delete mesh;
 
-   return 0;
+  return 0;
 }
